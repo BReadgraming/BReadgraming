@@ -54,7 +54,7 @@ def trading_signal(df):
     df['SL'] = np.nan
 
     lot_size = 0.01
-    tp_percentage = 0.005
+    tp_percentage = 0.5
     sl_fixed = 0.30
 
     buy_conditions = (df['Close'] > df['SMA_50']) & (df['Close'] > df['SMA_200']) & (df['RSI'] < 30)
