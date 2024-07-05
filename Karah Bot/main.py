@@ -1,85 +1,125 @@
-import pandas as pd
-import numpy as np
+import csv
 import os
+from datetime import datetime, timedelta
+from statistics import mean
 
 # Define paths
 data_paths = {
-    'AUDUSD': os.path.join('..', 'Data', 'AUDUSD_2024-07-04-00_00.csv'),
-    'EURUSD': os.path.join('..', 'Data', 'EURUSD_2024-07-04-00_00.csv'),
-    'GBPUSD': os.path.join('..', 'Data', 'GBPUSD_2024-07-04-00_00.csv'),
-    'USDCAD': os.path.join('..', 'Data', 'USDCAD_2024-07-04-00_00.csv'),
-    'USDJPY': os.path.join('..', 'Data', 'USDJPY_2024-07-04-00_00.csv')
+    'AUDUSD': os.path.join('Data', 'AUDUSD_2024-07-04-00_00.csv'),
+    'EURUSD': os.path.join('Data', 'EURUSD_2024-07-04-00_00.csv'),
+    'GBPUSD': os.path.join('Data', 'GBPUSD_2024-07-04-00_00.csv'),
+    'USDCAD': os.path.join('Data', 'USDCAD_2024-07-04-00_00.csv'),
+    'USDJPY': os.path.join('Data', 'USDJPY_2024-07-04-00_00.csv')
 }
 
+def read_csv(path):
+    with open(path, mode='r') as file:
+        reader = csv.DictReader(file)
+        return list(reader)
+
 # Read data
-data = {pair: pd.read_csv(path) for pair, path in data_paths.items()}
+data = {pair: read_csv(path) for pair, path in data_paths.items()}
 
-# Convert timestamps to datetime and set as index
+def to_datetime(data):
+    for row in data:
+        row['Timestamp'] = datetime.strptime(row['Timestamp'], '%Y-%m-%d %H:%M:%S')
+        row['Close'] = float(row['Close'])
+
 for df in data.values():
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    df.set_index('Timestamp', inplace=True)
+    to_datetime(df)
 
-def compute_rsi(series, window):
-    delta = series.diff(1)
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-    avg_gain = gain.rolling(window=window).mean()
-    avg_loss = loss.rolling(window=window).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
+def compute_sma(data, window):
+    sma = []
+    for i in range(len(data)):
+        if i < window:
+            sma.append(None)
+        else:
+            close_prices = [data[j]['Close'] for j in range(i - window, i)]
+            sma.append(mean(close_prices))
+    return sma
+
+def compute_rsi(data, window):
+    rsi = []
+    for i in range(len(data)):
+        if i < window:
+            rsi.append(None)
+        else:
+            gains, losses = 0, 0
+            for j in range(i - window, i):
+                change = data[j]['Close'] - data[j - 1]['Close']
+                if change > 0:
+                    gains += change
+                else:
+                    losses -= change
+            avg_gain = gains / window
+            avg_loss = losses / window
+            rs = avg_gain / avg_loss if avg_loss != 0 else 0
+            rsi.append(100 - (100 / (1 + rs)))
     return rsi
 
-def add_indicators(df):
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    df['SMA_200'] = df['Close'].rolling(window=200).mean()
-    df['RSI'] = compute_rsi(df['Close'], window=14)
-    return df
+def add_indicators(data):
+    sma_50 = compute_sma(data, 50)
+    sma_200 = compute_sma(data, 200)
+    rsi = compute_rsi(data, 14)
+    for i in range(len(data)):
+        data[i]['SMA_50'] = sma_50[i]
+        data[i]['SMA_200'] = sma_200[i]
+        data[i]['RSI'] = rsi[i]
 
-def fibonacci_retracement_levels(high, low):
-    diff = high - low
-    return {
-        'level_0.0': high,
-        'level_0.236': high - 0.236 * diff,
-        'level_0.382': high - 0.382 * diff,
-        'level_0.5': high - 0.5 * diff,
-        'level_0.618': high - 0.618 * diff,
-        'level_0.764': high - 0.764 * diff,
-        'level_1.0': low,
-    }
+for pair, df in data.items():
+    add_indicators(df)
 
-def trading_signal(df):
-    df['Signal'] = 0
-    df['Entry_Price'] = np.nan
-    df['TP'] = np.nan
-    df['SL'] = np.nan
-
+def trading_signal(data):
     lot_size = 0.01
-    tp_percentage = 0.5
-    sl_fixed = 0.30
+    tp_percentage = 0.005  # 0.50%
+    sl_fixed = 0.30  # 30 cents
 
-    buy_conditions = (df['Close'] > df['SMA_50']) & (df['Close'] > df['SMA_200']) & (df['RSI'] < 30)
-    sell_conditions = (df['Close'] < df['SMA_50']) & (df['Close'] < df['SMA_200']) & (df['RSI'] > 70)
+    for row in data:
+        row['Signal'] = 0
+        row['Entry_Price'] = None
+        row['TP'] = None
+        row['SL'] = None
 
-    for i in range(len(df)):
-        if buy_conditions[i]:
-            df.at[df.index[i], 'Signal'] = 1
-            df.at[df.index[i], 'Entry_Price'] = df['Close'][i]
-            df.at[df.index[i], 'TP'] = df['Close'][i] * (1 + tp_percentage)
-            df.at[df.index[i], 'SL'] = df['Close'][i] - sl_fixed
-        elif sell_conditions[i]:
-            df.at[df.index[i], 'Signal'] = -1
-            df.at[df.index[i], 'Entry_Price'] = df['Close'][i]
-            df.at[df.index[i], 'TP'] = df['Close'][i] * (1 - tp_percentage)
-            df.at[df.index[i], 'SL'] = df['Close'][i] + sl_fixed
+        if row['SMA_50'] and row['SMA_200'] and row['RSI']:
+            if row['Close'] > row['SMA_50'] and row['Close'] > row['SMA_200'] and row['RSI'] < 30:
+                row['Signal'] = 1
+                row['Entry_Price'] = row['Close']
+                row['TP'] = row['Close'] * (1 + tp_percentage)
+                row['SL'] = row['Close'] - sl_fixed
+            elif row['Close'] < row['SMA_50'] and row['Close'] < row['SMA_200'] and row['RSI'] > 70:
+                row['Signal'] = -1
+                row['Entry_Price'] = row['Close']
+                row['TP'] = row['Close'] * (1 - tp_percentage)
+                row['SL'] = row['Close'] + sl_fixed
 
-    return df
-
-# Process data
 for pair, df in data.items():
-    data[pair] = add_indicators(df)
-    data[pair] = trading_signal(df)
+    trading_signal(df)
 
-# Output processed data for verification
+def write_csv(data, path):
+    fieldnames = data[0].keys()
+    with open(path, mode='w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(data)
+
+# Save the processed data with trading signals for further use
+output_dir = os.path.join('ProcessedData')
+os.makedirs(output_dir, exist_ok=True)
 for pair, df in data.items():
-    print(f"{pair} Data:")
-    print(df[['Signal', 'Entry_Price', 'TP', 'SL']].dropna().head())
+    output_path = os.path.join(output_dir, f'{pair}_processed.csv')
+    write_csv(df, output_path)
+
+# Simulating continuous trading (market hours: 24 hours from Sunday 5 PM EST to Friday 5 PM EST)
+market_open = datetime(2024, 7, 7, 17)  # Sunday 5 PM EST
+market_close = datetime(2024, 7, 12, 17)  # Friday 5 PM EST
+current_time = market_open
+
+while current_time <= market_close:
+    for pair, df in data.items():
+        for row in df:
+            if row['Timestamp'] == current_time:
+                if row['Signal'] == 1:
+                    print(f"Buy Signal for {pair} at {row['Entry_Price']:.5f}. TP: {row['TP']:.5f}, SL: {row['SL']:.5f}")
+                elif row['Signal'] == -1:
+                    print(f"Sell Signal for {pair} at {row['Entry_Price']:.5f}. TP: {row['TP']:.5f}, SL: {row['SL']:.5f}")
+    current_time += timedelta(minutes=5)
