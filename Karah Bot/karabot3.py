@@ -11,22 +11,31 @@ data_paths = {
     'USDJPY': os.path.join('Data', 'USDJPY_2024-07-04-00_00.csv')
 }
 
-# Read CSV file
+# Read CSV file and handle missing 'Timestamp' or 'Close' key
 def read_csv(path):
+    data = []
     with open(path, mode='r') as file:
         reader = csv.DictReader(file)
-        return list(reader)
+        for row in reader:
+            if 'Timestamp' in row and 'Close' in row:
+                try:
+                    row['Timestamp'] = datetime.strptime(row['Timestamp'], '%Y-%m-%d %H:%M:%S')
+                    row['Close'] = float(row['Close'])
+                    data.append(row)
+                except ValueError as e:
+                    print(f"Error parsing row: {row}, error: {e}")
+            else:
+                print(f"'Timestamp' or 'Close' not found in {path}")
+    return data
 
 # Convert timestamps to datetime objects and parse float values for 'Close'
 def to_datetime(data):
     for row in data:
-        row['Timestamp'] = datetime.strptime(row['Timestamp'], '%Y-%m-%d %H:%M:%S')
-        row['Close'] = float(row['Close'])
-
-# Read and preprocess data
-data = {pair: read_csv(path) for pair, path in data_paths.items()}
-for df in data.values():
-    to_datetime(df)
+        try:
+            row['Timestamp'] = datetime.strptime(row['Timestamp'], '%Y-%m-%d %H:%M:%S')
+            row['Close'] = float(row['Close'])
+        except ValueError as e:
+            print(f"Error converting data: {row}, error: {e}")
 
 # Simplified trend analysis based on past prices
 def analyze_trends(current_price, past_prices):
@@ -42,19 +51,17 @@ account_balance = 10000.0  # Initial balance
 
 # Calculate take profit and stop loss based on balance
 def calculate_tp_sl(balance, current_price):
-    tp = current_price * (1 + 0.05)  # 5% of current price
-    sl = current_price * (1 - 0.01)  # 1% of current price
+    tp = current_price * 1.05  # 5% increase
+    sl = current_price * 0.99  # 1% decrease
     return tp, sl
 
 # Update account balance based on trade outcome
 def update_balance(order_type, price, tp, sl):
     global account_balance
     if order_type == "buy":
-        # Simulate hitting TP
-        account_balance += (tp - price) * 0.01  # Profit from trade
+        account_balance += (tp - price) * 0.01  # Simulate profit from trade
     elif order_type == "sell":
-        # Simulate hitting TP
-        account_balance += (price - tp) * 0.01  # Profit from trade
+        account_balance += (price - tp) * 0.01  # Simulate profit from trade
     print(f"Updated account balance: {account_balance:.2f}")
 
 # Simulate continuous trading during market hours (Sunday 5 PM EST to Friday 5 PM EST)
@@ -71,7 +78,7 @@ def run_trading_bot(data):
             break
 
         for pair, df in data.items():
-            past_prices = [row['Close'] for row in df if row['Timestamp'] < current_time]
+            past_prices = [row['Close'] for row in df if row.get('Timestamp') < current_time]
             if past_prices:
                 current_price = past_prices[-1]
                 decision = analyze_trends(current_price, past_prices[-50:])  # Use last 50 prices for trend analysis
@@ -85,6 +92,18 @@ def run_trading_bot(data):
                     update_balance("sell", current_price, tp, sl)
 
         current_time += timedelta(minutes=5)
+
+# Read and preprocess data
+data = {pair: read_csv(path) for pair, path in data_paths.items()}
+for df in data.values():
+    to_datetime(df)
+
+# Print the first few rows of each dataset to verify
+for pair, df in data.items():
+    print(f"{pair} data:")
+    for row in df[:5]:  # Print first 5 rows
+        print(row)
+    print()
 
 # Run the trading bot
 run_trading_bot(data)
