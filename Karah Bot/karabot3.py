@@ -1,7 +1,6 @@
 import csv
 import os
 from datetime import datetime, timedelta
-import MetaTrader5 as mt5
 
 # Define paths for CSV files
 data_paths = {
@@ -34,66 +33,40 @@ def analyze_trends(current_price, past_prices):
     avg_past_price = sum(past_prices) / len(past_prices)
     return "buy" if current_price < avg_past_price else "sell"
 
-# Initialize MetaTrader5 connection
-def connect_to_mt5():
-    if not mt5.initialize():
-        print("initialize() failed")
-        mt5.shutdown()
+# Placeholder function to simulate placing an order
+def place_order(pair, order_type, price, tp, sl):
+    print(f"{order_type.capitalize()} order placed for {pair} at {price:.5f}. TP: {tp:.5f}, SL: {sl:.5f}")
 
-# Get current account balance from MetaTrader5
-def get_account_balance():
-    account_info = mt5.account_info()
-    if account_info is None:
-        raise Exception("Failed to get account balance.")
-    return account_info.balance
-
-# Place order on MetaTrader5
-def place_order_mt5(pair, order_type, price, tp, sl):
-    symbol = pair
-    lot = 0.01
-    deviation = 20
-
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": lot,
-        "type": mt5.ORDER_TYPE_BUY if order_type == "buy" else mt5.ORDER_TYPE_SELL,
-        "price": price,
-        "sl": sl,
-        "tp": tp,
-        "deviation": deviation,
-        "magic": 234000,
-        "comment": "Karah Bot order",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_RETURN,
-    }
-
-    result = mt5.order_send(request)
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
-        print(f"Order failed: {result.comment}")
-    else:
-        print(f"Order placed successfully: {result}")
-    return result
+# Simulated account balance
+account_balance = 10000.0  # Initial balance
 
 # Calculate take profit and stop loss based on balance
 def calculate_tp_sl(balance, current_price):
-    tp = current_price * (1 + 0.05 * balance / current_price)  # 5% of balance
-    sl = current_price * (1 - 0.01 * balance / current_price)  # 1% of balance
+    tp = current_price * (1 + 0.05)  # 5% of current price
+    sl = current_price * (1 - 0.01)  # 1% of current price
     return tp, sl
+
+# Update account balance based on trade outcome
+def update_balance(order_type, price, tp, sl):
+    global account_balance
+    if order_type == "buy":
+        # Simulate hitting TP
+        account_balance += (tp - price) * 0.01  # Profit from trade
+    elif order_type == "sell":
+        # Simulate hitting TP
+        account_balance += (price - tp) * 0.01  # Profit from trade
+    print(f"Updated account balance: {account_balance:.2f}")
 
 # Simulate continuous trading during market hours (Sunday 5 PM EST to Friday 5 PM EST)
 def run_trading_bot(data):
     market_open = datetime(2024, 7, 7, 17)  # Sunday 5 PM EST
     market_close = datetime(2024, 7, 12, 17)  # Friday 5 PM EST
     current_time = market_open
-    initial_balance = get_account_balance()
+    initial_balance = account_balance
     target_balance = initial_balance * 1.30  # 30% daily return target
 
-    connect_to_mt5()
-
     while current_time <= market_close:
-        current_balance = get_account_balance()
-        if current_balance >= target_balance:
+        if account_balance >= target_balance:
             print("Daily return target achieved. Stopping trading.")
             break
 
@@ -102,16 +75,16 @@ def run_trading_bot(data):
             if past_prices:
                 current_price = past_prices[-1]
                 decision = analyze_trends(current_price, past_prices[-50:])  # Use last 50 prices for trend analysis
-                tp, sl = calculate_tp_sl(current_balance, current_price)
+                tp, sl = calculate_tp_sl(account_balance, current_price)
 
                 if decision == "buy":
-                    place_order_mt5(pair, "buy", current_price, tp, sl)
+                    place_order(pair, "buy", current_price, tp, sl)
+                    update_balance("buy", current_price, tp, sl)
                 elif decision == "sell":
-                    place_order_mt5(pair, "sell", current_price, tp, sl)
+                    place_order(pair, "sell", current_price, tp, sl)
+                    update_balance("sell", current_price, tp, sl)
 
         current_time += timedelta(minutes=5)
-
-    mt5.shutdown()
 
 # Run the trading bot
 run_trading_bot(data)
