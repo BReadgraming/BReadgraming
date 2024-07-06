@@ -1,0 +1,104 @@
+import csv
+import os
+from datetime import datetime, timedelta
+import random
+import MetaTrader5 as mt5  # For MetaTrader integration (ensure MetaTrader5 package is installed)
+
+# Define paths for CSV files
+data_paths = {
+    'AUDUSD': os.path.join('Data', 'AUDUSD_2024-07-04-00_00.csv'),
+    'EURUSD': os.path.join('Data', 'EURUSD_2024-07-04-00_00.csv'),
+    'GBPUSD': os.path.join('Data', 'GBPUSD_2024-07-04-00_00.csv'),
+    'USDCAD': os.path.join('Data', 'USDCAD_2024-07-04-00_00.csv'),
+    'USDJPY': os.path.join('Data', 'USDJPY_2024-07-04-00_00.csv')
+}
+
+# Read CSV file
+def read_csv(path):
+    with open(path, mode='r') as file:
+        reader = csv.DictReader(file)
+        return list(reader)
+
+# Convert timestamps to datetime objects and parse float values for 'Close'
+def to_datetime(data):
+    for row in data:
+        row['Timestamp'] = datetime.strptime(row['Timestamp'], '%Y-%m-%d %H:%M:%S')
+        row['Close'] = float(row['Close'])
+
+# Read and preprocess data
+data = {pair: read_csv(path) for pair, path in data_paths.items()}
+for df in data.values():
+    to_datetime(df)
+
+# Simplified trend analysis based on past prices
+def analyze_trends(current_price, past_prices):
+    avg_past_price = sum(past_prices) / len(past_prices)
+    return "buy" if current_price < avg_past_price else "sell"
+
+# Place order (placeholder function for integration with actual trading platform)
+def place_order(pair, order_type, price, tp, sl):
+    print(f"{order_type.capitalize()} order placed for {pair} at {price:.5f}. TP: {tp:.5f}, SL: {sl:.5f}")
+
+# Initialize MetaTrader5 connection
+def connect_to_mt5():
+    if not mt5.initialize():
+        print("initialize() failed")
+        mt5.shutdown()
+
+# Place order on MetaTrader5
+def place_order_mt5(pair, order_type, price, tp, sl):
+    symbol = pair
+    lot = 0.01
+    deviation = 20
+
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": lot,
+        "type": mt5.ORDER_TYPE_BUY if order_type == "buy" else mt5.ORDER_TYPE_SELL,
+        "price": price,
+        "sl": sl,
+        "tp": tp,
+        "deviation": deviation,
+        "magic": 234000,
+        "comment": "Karah Bot order",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_RETURN,
+    }
+
+    result = mt5.order_send(request)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"Order failed: {result.comment}")
+    else:
+        print(f"Order placed successfully: {result}")
+
+# Simulate continuous trading during market hours (Sunday 5 PM EST to Friday 5 PM EST)
+market_open = datetime(2024, 7, 7, 17)  # Sunday 5 PM EST
+market_close = datetime(2024, 7, 12, 17)  # Friday 5 PM EST
+current_time = market_open
+
+# Connect to MetaTrader5 platform
+connect_to_mt5()
+
+while current_time <= market_close:
+    for pair, df in data.items():
+        past_prices = [row['Close'] for row in df if row['Timestamp'] < current_time]
+        if past_prices:
+            current_price = random.choice(past_prices)  # Simulate receiving current price data
+            decision = analyze_trends(current_price, past_prices[-50:])  # Use last 50 prices for trend analysis
+            tp_percentage = 0.005  # 0.50%
+            sl_fixed = 0.30  # 30 cents
+
+            if decision == "buy":
+                tp = current_price * (1 + tp_percentage)
+                sl = current_price - sl_fixed
+                place_order_mt5(pair, "buy", current_price, tp, sl)
+            elif decision == "sell":
+                tp = current_price * (1 - tp_percentage)
+                sl = current_price + sl_fixed
+                place_order_mt5(pair, "sell", current_price, tp, sl)
+
+    current_time += timedelta(minutes=5)
+
+# Shutdown MetaTrader5 connection
+mt5.shutdown()
