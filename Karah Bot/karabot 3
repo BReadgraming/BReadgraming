@@ -1,8 +1,7 @@
 import csv
 import os
 from datetime import datetime, timedelta
-import random
-import MetaTrader5 as mt5  # For MetaTrader integration (ensure MetaTrader5 package is installed)
+import MetaTrader5 as mt5
 
 # Define paths for CSV files
 data_paths = {
@@ -35,15 +34,18 @@ def analyze_trends(current_price, past_prices):
     avg_past_price = sum(past_prices) / len(past_prices)
     return "buy" if current_price < avg_past_price else "sell"
 
-# Place order (placeholder function for integration with actual trading platform)
-def place_order(pair, order_type, price, tp, sl):
-    print(f"{order_type.capitalize()} order placed for {pair} at {price:.5f}. TP: {tp:.5f}, SL: {sl:.5f}")
-
 # Initialize MetaTrader5 connection
 def connect_to_mt5():
     if not mt5.initialize():
         print("initialize() failed")
         mt5.shutdown()
+
+# Get current account balance from MetaTrader5
+def get_account_balance():
+    account_info = mt5.account_info()
+    if account_info is None:
+        raise Exception("Failed to get account balance.")
+    return account_info.balance
 
 # Place order on MetaTrader5
 def place_order_mt5(pair, order_type, price, tp, sl):
@@ -71,34 +73,45 @@ def place_order_mt5(pair, order_type, price, tp, sl):
         print(f"Order failed: {result.comment}")
     else:
         print(f"Order placed successfully: {result}")
+    return result
+
+# Calculate take profit and stop loss based on balance
+def calculate_tp_sl(balance, current_price):
+    tp = current_price * (1 + 0.05 * balance / current_price)  # 5% of balance
+    sl = current_price * (1 - 0.01 * balance / current_price)  # 1% of balance
+    return tp, sl
 
 # Simulate continuous trading during market hours (Sunday 5 PM EST to Friday 5 PM EST)
-market_open = datetime(2024, 7, 7, 17)  # Sunday 5 PM EST
-market_close = datetime(2024, 7, 12, 17)  # Friday 5 PM EST
-current_time = market_open
+def run_trading_bot(data):
+    market_open = datetime(2024, 7, 7, 17)  # Sunday 5 PM EST
+    market_close = datetime(2024, 7, 12, 17)  # Friday 5 PM EST
+    current_time = market_open
+    initial_balance = get_account_balance()
+    target_balance = initial_balance * 1.30  # 30% daily return target
 
-# Connect to MetaTrader5 platform
-connect_to_mt5()
+    connect_to_mt5()
 
-while current_time <= market_close:
-    for pair, df in data.items():
-        past_prices = [row['Close'] for row in df if row['Timestamp'] < current_time]
-        if past_prices:
-            current_price = random.choice(past_prices)  # Simulate receiving current price data
-            decision = analyze_trends(current_price, past_prices[-50:])  # Use last 50 prices for trend analysis
-            tp_percentage = 0.005  # 0.50%
-            sl_fixed = 0.30  # 30 cents
+    while current_time <= market_close:
+        current_balance = get_account_balance()
+        if current_balance >= target_balance:
+            print("Daily return target achieved. Stopping trading.")
+            break
 
-            if decision == "buy":
-                tp = current_price * (1 + tp_percentage)
-                sl = current_price - sl_fixed
-                place_order_mt5(pair, "buy", current_price, tp, sl)
-            elif decision == "sell":
-                tp = current_price * (1 - tp_percentage)
-                sl = current_price + sl_fixed
-                place_order_mt5(pair, "sell", current_price, tp, sl)
+        for pair, df in data.items():
+            past_prices = [row['Close'] for row in df if row['Timestamp'] < current_time]
+            if past_prices:
+                current_price = past_prices[-1]
+                decision = analyze_trends(current_price, past_prices[-50:])  # Use last 50 prices for trend analysis
+                tp, sl = calculate_tp_sl(current_balance, current_price)
 
-    current_time += timedelta(minutes=5)
+                if decision == "buy":
+                    place_order_mt5(pair, "buy", current_price, tp, sl)
+                elif decision == "sell":
+                    place_order_mt5(pair, "sell", current_price, tp, sl)
 
-# Shutdown MetaTrader5 connection
-mt5.shutdown()
+        current_time += timedelta(minutes=5)
+
+    mt5.shutdown()
+
+# Run the trading bot
+run_trading_bot(data)
